@@ -1,0 +1,16 @@
+[Unit]
+Description=Kinopoisk Rating Stremio Addon
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/kinopoisk-rating-addon
+EnvironmentFile=/opt/kinopoisk-rating-addon/.env
+ExecStart=/usr/bin/env node src/index.js
+Restart=always
+RestartSec=3
+User=www-data
+Group=www-data
+
+[Install]
+WantedBy=multi-user.target

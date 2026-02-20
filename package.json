@@ -1,0 +1,21 @@
+{
+  "name": "kinopoisk-stremio-rating-addon",
+  "version": "1.0.8",
+  "description": "Stremio addon that enriches posters and metadata with KinoPoisk ratings",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "stremio-addon-sdk": "^1.6.10"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}
