@@ -42,81 +42,94 @@ npm start
 
 By default it runs on `http://localhost:3000`.
 
-## Deploy On VPS (Nginx + Cloudflare)
+## Deploy On VPS (Traefik + Cloudflare)
 
-Target domain in this example: `kinopoiskrating.simg.pro`.
+This guide is for users who already run Traefik on their VPS and want to expose this addon on their own subdomain.
+
+Example target URL in this guide:
+- `https://addon.example.com`
 
 ### 1. Prepare server
 
 ```bash
 sudo apt update
-sudo apt install -y git curl nginx
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
+sudo apt install -y git curl docker.io
+sudo systemctl enable --now docker
 ```
 
-### 2. Upload project and install deps
+### 2. Clone project and install dependencies once
 
 ```bash
-sudo mkdir -p /opt/kinopoisk-rating-addon
-sudo chown "$USER":"$USER" /opt/kinopoisk-rating-addon
-
-# Option A: clone repo
-git clone <your-repo-url> /opt/kinopoisk-rating-addon
-
-# Option B: if folder already local, upload via rsync/scp
-# rsync -av ./ /opt/kinopoisk-rating-addon/
-
+sudo mkdir -p /opt
+cd /opt
+sudo git clone <your-repo-url> kinopoisk-rating-addon
 cd /opt/kinopoisk-rating-addon
-npm ci --omit=dev
-cp deploy/env.production.example .env
+sudo npm ci --omit=dev
+sudo cp deploy/env.production.example .env
 ```
 
-Edit `.env` and set:
-- `KINOPOISK_API_KEY=<your key>`
-- `PUBLIC_URL=https://kinopoiskrating.simg.pro`
+Edit `/opt/kinopoisk-rating-addon/.env`:
+- `KINOPOISK_API_KEY=...`
+- `PUBLIC_URL=https://addon.example.com`
 
-### 3. Run as systemd service
+### 3. Find Traefik Docker network and certificate resolver
 
 ```bash
-cd /opt/kinopoisk-rating-addon
-sudo cp deploy/systemd/kinopoisk-rating.service /etc/systemd/system/kinopoisk-rating.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now kinopoisk-rating
-sudo systemctl status kinopoisk-rating --no-pager
+TRAEFIK_NET=$(docker inspect traefik --format '{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}' | head -n1)
+RESOLVER=$(docker inspect traefik --format '{{range .Config.Cmd}}{{println .}}{{end}}' | sed -nE 's/.*--certificatesresolvers\.([^.]+)\.acme.*/\1/p' | head -n1)
+echo "TRAEFIK_NET=$TRAEFIK_NET"
+echo "RESOLVER=$RESOLVER"
 ```
 
-If needed, edit service user/group before start:
-`sudo nano /etc/systemd/system/kinopoisk-rating.service`
+If either value is empty, inspect your Traefik setup and set them manually.
 
-### 4. Nginx reverse proxy
+### 4. Run addon container behind Traefik
 
 ```bash
 cd /opt/kinopoisk-rating-addon
-sudo cp deploy/nginx/kinopoiskrating.simg.pro.conf /etc/nginx/sites-available/kinopoiskrating.simg.pro.conf
-sudo ln -s /etc/nginx/sites-available/kinopoiskrating.simg.pro.conf /etc/nginx/sites-enabled/kinopoiskrating.simg.pro.conf
-sudo nginx -t
-sudo systemctl reload nginx
+TRAEFIK_NET=$(docker inspect traefik --format '{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}' | head -n1)
+RESOLVER=$(docker inspect traefik --format '{{range .Config.Cmd}}{{println .}}{{end}}' | sed -nE 's/.*--certificatesresolvers\.([^.]+)\.acme.*/\1/p' | head -n1)
+
+docker rm -f kinopoisk-rating 2>/dev/null || true
+docker run -d \
+  --name kinopoisk-rating \
+  --restart unless-stopped \
+  --network "$TRAEFIK_NET" \
+  --env-file /opt/kinopoisk-rating-addon/.env \
+  -e HOST=0.0.0.0 \
+  -e PORT=3000 \
+  -v /opt/kinopoisk-rating-addon:/app \
+  -w /app \
+  -l traefik.enable=true \
+  -l traefik.docker.network="$TRAEFIK_NET" \
+  -l traefik.http.routers.kinopoiskrating.rule='Host(`addon.example.com`)' \
+  -l traefik.http.routers.kinopoiskrating.entrypoints=websecure \
+  -l traefik.http.routers.kinopoiskrating.tls=true \
+  -l traefik.http.routers.kinopoiskrating.tls.certresolver="$RESOLVER" \
+  -l traefik.http.services.kinopoiskrating.loadbalancer.server.port=3000 \
+  node:20-alpine sh -lc 'npm ci --omit=dev && node src/index.js'
 ```
 
-### 5. Cloudflare DNS
+### 5. Add DNS record in Cloudflare
 
-In Cloudflare dashboard for `simg.pro`:
-1. Add `A` record:
-   - `Name`: `kinopoiskrating`
-   - `IPv4`: `<your VPS public IP>`
-   - `Proxy status`: `Proxied` (orange cloud)
-2. SSL/TLS mode:
-   - quick start with this config: `Flexible`
-   - recommended later: configure origin TLS and switch to `Full (strict)`
+For your domain zone:
+1. Add `A` record for your subdomain:
+   - Name: `addon` (or any custom name)
+   - IPv4: `<your VPS IP>`
+   - Proxy status: `Proxied`
+2. SSL/TLS mode in Cloudflare:
+   - use `Full (strict)` when Traefik ACME/cert resolver is configured.
 
-### 6. Check
+### 6. Verify deployment
 
-- Health: `https://kinopoiskrating.simg.pro/health`
-- Manifest: `https://kinopoiskrating.simg.pro/manifest.json`
+```bash
+curl -sS https://addon.example.com/health
+curl -sS https://addon.example.com/manifest.json | head
+docker logs -n 100 kinopoisk-rating
+```
 
-Use manifest URL in Stremio:
-`https://kinopoiskrating.simg.pro/manifest.json`
+Use this URL in Stremio:
+- `https://addon.example.com/manifest.json`
 
 ## Install In Stremio
 
@@ -155,6 +168,6 @@ Use manifest URL in Stremio:
 - Legacy alias `KINOPOISK_UNOFFICIAL_API_KEY` is still accepted by code for backward compatibility.
 - Due to API/provider differences, exact field mapping may vary across titles.
 - For remote usage (mobile/TV clients), set `PUBLIC_URL` to a reachable HTTPS endpoint.
-- For VPS behind nginx, recommended `.env`: `HOST=127.0.0.1` and `PORT=3000`.
+- For Traefik deployment in Docker, use `.env` with `HOST=0.0.0.0` and `PORT=3000`.
 - If your plan has strict limits, keep: `SEARCH_FALLBACK_ENABLED=false`, `MAX_ENRICH_ITEMS=8`, `MAX_ENRICH_CONCURRENCY=2`, `KINOPOISK_MIN_INTERVAL_MS=300`.
 - On HTTP `402` (quota exceeded), addon pauses rating enrichment until restart or key change.
