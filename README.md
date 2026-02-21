@@ -137,6 +137,104 @@ docker logs -n 100 kinopoisk-rating
 URL для установки в Stremio:
 - `https://addon.example.com/manifest.json`
 
+## Деплой на VPS без Traefik (простой вариант: systemd + Nginx + Cloudflare)
+
+Если у тебя нет Traefik, это самый простой способ:
+- запускаем Node.js как systemd-сервис,
+- Nginx проксирует запросы на локальный порт аддона,
+- Cloudflare дает публичный HTTPS.
+
+Пример домена:
+- `https://addon.example.com`
+
+### 1. Подготовка сервера
+
+```bash
+sudo apt update
+sudo apt install -y git curl nginx
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+```
+
+### 2. Клонирование проекта и настройка `.env`
+
+```bash
+sudo mkdir -p /opt
+cd /opt
+sudo git clone <your-repo-url> kinopoisk-rating-addon
+cd /opt/kinopoisk-rating-addon
+sudo npm ci --omit=dev
+sudo cp deploy/env.production.example .env
+```
+
+Открой `/opt/kinopoisk-rating-addon/.env` и выставь:
+- `KINOPOISK_API_KEY=...`
+- `PUBLIC_URL=https://addon.example.com`
+- `HOST=127.0.0.1`
+- `PORT=38117` (или любой другой свободный порт)
+
+### 3. Запуск через systemd
+
+```bash
+cd /opt/kinopoisk-rating-addon
+sudo chown -R www-data:www-data /opt/kinopoisk-rating-addon
+sudo cp deploy/systemd/kinopoisk-rating.service /etc/systemd/system/kinopoisk-rating.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now kinopoisk-rating
+sudo systemctl status kinopoisk-rating --no-pager
+```
+
+### 4. Nginx reverse proxy
+
+```bash
+sudo tee /etc/nginx/sites-available/kinopoisk-rating.conf > /dev/null <<'EOF'
+server {
+    listen 80;
+    listen [::]:80;
+    server_name addon.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:38117;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+EOF
+
+sudo ln -sf /etc/nginx/sites-available/kinopoisk-rating.conf /etc/nginx/sites-enabled/kinopoisk-rating.conf
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Если ты выбрал другой `PORT` в `.env`, обязательно поменяй его в `proxy_pass`.
+
+### 5. DNS в Cloudflare
+
+Для своей зоны Cloudflare:
+1. Создай `A` запись:
+   - Name: `addon` (или любое имя поддомена)
+   - IPv4: `<your VPS IP>`
+   - Proxy status: `Proxied`
+2. Для быстрого старта установи SSL/TLS mode = `Flexible`.
+
+### 6. Проверка
+
+```bash
+curl -sS http://127.0.0.1:38117/health
+curl -sS https://addon.example.com/health
+curl -sS https://addon.example.com/manifest.json | head
+```
+
+Если что-то не работает:
+```bash
+sudo systemctl status kinopoisk-rating --no-pager
+sudo journalctl -u kinopoisk-rating -n 100 --no-pager
+sudo nginx -t
+```
+
 ## Установка в Stremio
 
 1. Открой Stremio.
