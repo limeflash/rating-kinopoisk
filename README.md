@@ -1,57 +1,57 @@
-# KinoPoisk Rating Stremio Addon
+# KinoPoisk Rating Addon для Stremio
 
-![KinoPoisk rating addon preview](docs/images/screen.png)
+![Превью аддона KinoPoisk Rating](docs/images/screen.png)
 
-Stremio addon that works like a rating-overlay addon, but focused on **KinoPoisk** ratings.
+Аддон для Stremio, который показывает рейтинг Кинопоиска на странице фильма или сериала.
 
-It works in detail-page mode:
-- when opening a movie/series page, addon fetches KinoPoisk rating,
-- renders a clean text block in the streams panel filter (like `IMDb Ratings`),
-- does not alter catalog posters/cards by default.
+Аддон работает в режиме страницы тайтла:
+- при открытии фильма/сериала делает запрос к KinoPoisk API,
+- отображает блок в списке провайдеров стримов (как отдельный источник),
+- по клику открывает карточку фильма на Кинопоиске.
 
-## Features
+## Возможности
 
-- KinoPoisk rating shown on movie/series details page.
-- Text output format:
+- Отображение рейтинга Кинопоиска на странице фильма/сериала.
+- Формат вывода:
   - `Kinopoisk рейтинг`
   - `⭐ Кинопоиск: 8.1/10`
   - `(45,123 голосов)`
-- In-memory cache for rating lookups.
-- Data source: official `kinopoiskapiunofficial.tech` OpenAPI endpoints:
+- Кэширование ответов в памяти.
+- Источник данных: `kinopoiskapiunofficial.tech`:
   - `/api/v2.2/films?imdbId=<tt...>`
   - `/api/v2.2/films?keyword=<title>`
-- Rate-limit aware behavior: endpoint limit is `5 req/sec` for `/api/v2.2/films`; addon throttles requests and enters cooldown on `HTTP 429`.
+- Учет лимитов API: для `/api/v2.2/films` добавлен троттлинг запросов и пауза после `HTTP 429`.
 
-## Requirements
+## Требования
 
 - Node.js 18+
-- KinoPoisk Unofficial API key (`X-API-KEY`)
+- API-ключ KinoPoisk Unofficial (`X-API-KEY`)
 
-## Setup
+## Быстрый старт
 
 ```bash
 npm install
 cp .env.template .env
 ```
 
-Edit `.env` and set your API key in `KINOPOISK_API_KEY`.
+Открой `.env` и укажи ключ в `KINOPOISK_API_KEY`.
 
-## Run
+## Локальный запуск
 
 ```bash
 npm start
 ```
 
-By default it runs on `http://localhost:3000`.
+По умолчанию аддон доступен на `http://localhost:3000`.
 
-## Deploy On VPS (Traefik + Cloudflare)
+## Деплой на VPS (Traefik + Cloudflare)
 
-This guide is for users who already run Traefik on their VPS and want to expose this addon on their own subdomain.
+Этот раздел для случая, когда у тебя уже есть Traefik на VPS, и ты хочешь поднять аддон на своем поддомене.
 
-Example target URL in this guide:
+Пример домена в инструкции:
 - `https://addon.example.com`
 
-### 1. Prepare server
+### 1. Подготовка сервера
 
 ```bash
 sudo apt update
@@ -59,7 +59,7 @@ sudo apt install -y git curl docker.io
 sudo systemctl enable --now docker
 ```
 
-### 2. Clone project and install dependencies once
+### 2. Клонирование проекта и установка зависимостей
 
 ```bash
 sudo mkdir -p /opt
@@ -70,11 +70,11 @@ sudo npm ci --omit=dev
 sudo cp deploy/env.production.example .env
 ```
 
-Edit `/opt/kinopoisk-rating-addon/.env`:
+Отредактируй `/opt/kinopoisk-rating-addon/.env`:
 - `KINOPOISK_API_KEY=...`
 - `PUBLIC_URL=https://addon.example.com`
 
-### 3. Find Traefik Docker network and certificate resolver
+### 3. Определение Docker-сети Traefik и cert resolver
 
 ```bash
 TRAEFIK_NET=$(docker inspect traefik --format '{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}' | head -n1)
@@ -83,9 +83,9 @@ echo "TRAEFIK_NET=$TRAEFIK_NET"
 echo "RESOLVER=$RESOLVER"
 ```
 
-If either value is empty, inspect your Traefik setup and set them manually.
+Если одно из значений пустое, нужно вручную указать сеть/резолвер из твоей конфигурации Traefik.
 
-### 4. Run addon container behind Traefik
+### 4. Запуск контейнера аддона за Traefik
 
 ```bash
 cd /opt/kinopoisk-rating-addon
@@ -112,17 +112,17 @@ docker run -d \
   node:20-alpine sh -lc 'npm ci --omit=dev && node src/index.js'
 ```
 
-### 5. Add DNS record in Cloudflare
+### 5. DNS-запись в Cloudflare
 
-For your domain zone:
-1. Add `A` record for your subdomain:
-   - Name: `addon` (or any custom name)
+В своей зоне Cloudflare:
+1. Добавь `A` запись для поддомена:
+   - Name: `addon` (или любое другое имя)
    - IPv4: `<your VPS IP>`
    - Proxy status: `Proxied`
-2. SSL/TLS mode in Cloudflare:
-   - use `Full (strict)` when Traefik ACME/cert resolver is configured.
+2. SSL/TLS режим:
+   - `Full (strict)` (если в Traefik настроен ACME/cert resolver).
 
-### 6. Verify deployment
+### 6. Проверка
 
 ```bash
 curl -sS https://addon.example.com/health
@@ -130,46 +130,50 @@ curl -sS https://addon.example.com/manifest.json | head
 docker logs -n 100 kinopoisk-rating
 ```
 
-Use this URL in Stremio:
+URL для установки в Stremio:
 - `https://addon.example.com/manifest.json`
 
-## Install In Stremio
+## Установка в Stremio
 
-1. Open Stremio.
-2. Go to `Addons`.
-3. Remove older version of this addon if installed.
-4. Choose `Add Addon`.
-5. Paste manifest URL:
-   - `http://localhost:3000/manifest.json`
-   - or your public URL if deployed remotely.
-6. In movie/series page open streams list and select provider filter `Kinopoisk рейтинг` (or `All`).
+1. Открой Stremio.
+2. Перейди в `Addons`.
+3. Удали старую версию аддона (если установлена).
+4. Нажми `Add Addon`.
+5. Вставь URL манифеста:
+   - `http://localhost:3000/manifest.json` для локального запуска,
+   - или публичный URL при деплое.
+6. На странице фильма/сериала выбери фильтр провайдера `Kinopoisk рейтинг` (или `All`).
 
-## Environment Variables
+## Переменные окружения
 
-| Variable | Default | Description |
+| Переменная | По умолчанию | Описание |
 |---|---|---|
-| `PORT` | `3000` | HTTP port |
-| `HOST` | `0.0.0.0` | Bind host |
-| `PUBLIC_URL` | `http://localhost:<PORT>` | External URL used in poster links |
-| `CINEMETA_BASE_URL` | `https://v3-cinemeta.strem.io` | Upstream metadata provider |
-| `KINOPOISK_API_KEY` | empty | API key for `kinopoiskapiunofficial.tech` |
-| `CACHE_TTL_MINUTES` | `720` | In-memory cache TTL |
-| `FETCH_TIMEOUT_MS` | `10000` | HTTP timeout |
-| `MAX_ENRICH_CONCURRENCY` | `2` | Reserved for compatibility |
-| `MAX_ENRICH_ITEMS` | `12` | Reserved for compatibility |
-| `SEARCH_FALLBACK_ENABLED` | `true` | If `false`, skip keyword fallback and use IMDb lookup only |
-| `MAX_SEARCH_FALLBACK_ITEMS` | `3` | Max items per catalog request that can do keyword fallback |
-| `RATE_LIMIT_COOLDOWN_SECONDS` | `300` | Cooldown duration after HTTP 429 (unless Retry-After is returned) |
-| `KINOPOISK_MIN_INTERVAL_MS` | `250` | Minimum interval between KinoPoisk requests (throttle for 5 req/sec endpoint) |
-| `POSTER_OVERLAY_ENABLED` | `false` | Reserved for compatibility |
-| `TITLE_RATING_ENABLED` | `true` | Reserved for compatibility |
-| `STREAM_FETCH_CINEMETA_META` | `false` | If `true`, stream handler additionally fetches Cinemeta meta (slower) |
+| `PORT` | `3000` | Порт HTTP-сервера аддона |
+| `HOST` | `0.0.0.0` | Хост для bind |
+| `PUBLIC_URL` | `http://localhost:<PORT>` | Публичный URL аддона (используется в ссылках) |
+| `CINEMETA_BASE_URL` | `https://v3-cinemeta.strem.io` | Апстрим-провайдер метаданных |
+| `KINOPOISK_API_KEY` | пусто | API-ключ для `kinopoiskapiunofficial.tech` |
+| `CACHE_TTL_MINUTES` | `720` | TTL кэша в памяти |
+| `FETCH_TIMEOUT_MS` | `10000` | Таймаут HTTP-запросов |
+| `MAX_ENRICH_CONCURRENCY` | `2` | Служебная настройка совместимости |
+| `MAX_ENRICH_ITEMS` | `12` | Служебная настройка совместимости |
+| `SEARCH_FALLBACK_ENABLED` | `true` | Если `false`, отключает fallback-поиск по названию |
+| `MAX_SEARCH_FALLBACK_ITEMS` | `3` | Сколько элементов можно дополнительно проверять через fallback |
+| `RATE_LIMIT_COOLDOWN_SECONDS` | `300` | Пауза после `HTTP 429` (если API не вернул Retry-After) |
+| `KINOPOISK_MIN_INTERVAL_MS` | `250` | Минимальный интервал между запросами к KinoPoisk |
+| `POSTER_OVERLAY_ENABLED` | `false` | Служебная настройка совместимости |
+| `TITLE_RATING_ENABLED` | `true` | Служебная настройка совместимости |
+| `STREAM_FETCH_CINEMETA_META` | `false` | Если `true`, stream handler дополнительно тянет Cinemeta meta |
 
-## Notes
+## Примечания
 
-- Legacy alias `KINOPOISK_UNOFFICIAL_API_KEY` is still accepted by code for backward compatibility.
-- Due to API/provider differences, exact field mapping may vary across titles.
-- For remote usage (mobile/TV clients), set `PUBLIC_URL` to a reachable HTTPS endpoint.
-- For Traefik deployment in Docker, use `.env` with `HOST=0.0.0.0` and `PORT=3000`.
-- If your plan has strict limits, keep: `SEARCH_FALLBACK_ENABLED=false`, `MAX_ENRICH_ITEMS=8`, `MAX_ENRICH_CONCURRENCY=2`, `KINOPOISK_MIN_INTERVAL_MS=300`.
-- On HTTP `402` (quota exceeded), addon pauses rating enrichment until restart or key change.
+- Алиас `KINOPOISK_UNOFFICIAL_API_KEY` поддерживается для обратной совместимости.
+- Из-за отличий в источниках данных поля и сопоставления могут отличаться для отдельных тайтлов.
+- Для удаленного доступа (мобильные/TV-клиенты) обязательно указывай корректный `PUBLIC_URL` по HTTPS.
+- Для деплоя через Traefik в Docker используй `.env` с `HOST=0.0.0.0` и `PORT=3000`.
+- Если у твоего тарифа строгие лимиты API, используй:
+  - `SEARCH_FALLBACK_ENABLED=false`
+  - `MAX_ENRICH_ITEMS=8`
+  - `MAX_ENRICH_CONCURRENCY=2`
+  - `KINOPOISK_MIN_INTERVAL_MS=300`
+- При `HTTP 402` (квота исчерпана) аддон ставит обогащение рейтингов на паузу до перезапуска или смены ключа.
