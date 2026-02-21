@@ -227,6 +227,9 @@ sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
+Готовый пример конфига также есть в репозитории:
+- `deploy/nginx/addon.example.com.conf`
+
 Если ты выбрал другой `PORT` в `.env`, обязательно поменяй его в `proxy_pass`.
 
 ### 5. DNS в Cloudflare
@@ -343,3 +346,15 @@ ssh root@YOUR_VPS_IP "sudo /opt/kinopoisk-rating-addon/scripts/update.sh"
   - `MAX_ENRICH_CONCURRENCY=2`
   - `KINOPOISK_MIN_INTERVAL_MS=300`
 - При `HTTP 402` (квота исчерпана) аддон ставит обогащение рейтингов на паузу до перезапуска или смены ключа.
+
+## Дисклеймер
+
+- Проект не аффилирован с KinoPoisk, Яндексом и Stremio.
+- Названия и товарные знаки (`KinoPoisk`, `Stremio`) принадлежат их правообладателям.
+- Аддон использует сторонний источник данных [kinopoiskapiunofficial.tech](https://kinopoiskapiunofficial.tech/). Перед использованием проверь актуальные условия и ограничения этого API.
+- Проект не предоставляет видеоконтент и не обходит DRM/платные подписки, а только отображает рейтинг и ссылку на страницу тайтла.
+
+## Лицензия
+
+Этот проект распространяется по лицензии MIT.
+См. файл `LICENSE`.

@@ -2,6 +2,7 @@
   "name": "kinopoisk-stremio-rating-addon",
   "version": "1.1.0",
   "description": "Stremio addon that enriches posters and metadata with KinoPoisk ratings",
+  "license": "MIT",
   "main": "src/index.js",
   "type": "commonjs",
   "scripts": {
