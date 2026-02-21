@@ -22,6 +22,13 @@ const KINOPOISK_MIN_INTERVAL_MS = Math.max(Number(process.env.KINOPOISK_MIN_INTE
 const POSTER_OVERLAY_ENABLED = String(process.env.POSTER_OVERLAY_ENABLED || 'false').toLowerCase() === 'true';
 const TITLE_RATING_ENABLED = String(process.env.TITLE_RATING_ENABLED || 'true').toLowerCase() !== 'false';
 const STREAM_FETCH_CINEMETA_META = String(process.env.STREAM_FETCH_CINEMETA_META || 'false').toLowerCase() === 'true';
+const DEFAULT_STREAM_NAME = process.env.DEFAULT_STREAM_NAME || 'Kinopoisk рейтинг';
+const DEFAULT_RATING_FORMAT = process.env.DEFAULT_RATING_FORMAT || 'withMax';
+const DEFAULT_VOTES_FORMAT = process.env.DEFAULT_VOTES_FORMAT || 'commas';
+const DEFAULT_DISPLAY_FORMAT = process.env.DEFAULT_DISPLAY_FORMAT || 'multiLine';
+const DEFAULT_SHOW_VOTES = String(process.env.DEFAULT_SHOW_VOTES || 'true').toLowerCase() !== 'false';
+const DEFAULT_SHOW_MOVIES = String(process.env.DEFAULT_SHOW_MOVIES || 'true').toLowerCase() !== 'false';
+const DEFAULT_SHOW_SERIES = String(process.env.DEFAULT_SHOW_SERIES || 'true').toLowerCase() !== 'false';
 
 function loadLocalEnvFile() {
   const envPath = path.resolve(process.cwd(), '.env');
@@ -67,18 +74,13 @@ function loadLocalEnvFile() {
 }
 
 const MANIFEST_ID = process.env.ADDON_ID || 'org.ennanoff.kinopoisk.rating';
-const MANIFEST_VERSION = process.env.ADDON_VERSION || '1.0.8';
+const MANIFEST_VERSION = process.env.ADDON_VERSION || '1.1.0';
 const MANIFEST_NAME = process.env.ADDON_NAME || 'Kinopoisk рейтинг';
 
 const configuredPublicUrl = (process.env.PUBLIC_URL || '').trim().replace(/\/$/, '');
 let runtimePublicUrl = configuredPublicUrl || `http://localhost:${PORT}`;
 let hasLoggedMissingToken = false;
-let kinopoiskRateLimitedUntil = 0;
-let hasLoggedRateLimit = false;
-let kinopoiskQuotaExceeded = false;
-let hasLoggedQuotaExceeded = false;
-let kinopoiskNextRequestAt = 0;
-let kinopoiskRateGate = Promise.resolve();
+const kinopoiskApiState = new Map();
 
 const ratingCache = new Map();
 
@@ -112,6 +114,54 @@ const manifest = {
     },
   ],
   idPrefixes: ['tt'],
+  behaviorHints: {
+    configurable: true,
+  },
+  config: [
+    {
+      key: 'apiKey',
+      type: 'text',
+      title: 'KinoPoisk API key (optional)',
+    },
+    {
+      key: 'streamName',
+      type: 'text',
+      title: 'Stream name',
+    },
+    {
+      key: 'displayFormat',
+      type: 'select',
+      title: 'Display format',
+      options: ['multiLine', 'singleLine'],
+    },
+    {
+      key: 'ratingFormat',
+      type: 'select',
+      title: 'Rating format',
+      options: ['withMax', 'plain'],
+    },
+    {
+      key: 'showVotes',
+      type: 'checkbox',
+      title: 'Show votes',
+    },
+    {
+      key: 'votesFormat',
+      type: 'select',
+      title: 'Votes format',
+      options: ['commas', 'compact'],
+    },
+    {
+      key: 'showMovies',
+      type: 'checkbox',
+      title: 'Show ratings for movies',
+    },
+    {
+      key: 'showSeries',
+      type: 'checkbox',
+      title: 'Show ratings for series',
+    },
+  ],
 };
 
 const builder = new addonBuilder(manifest);
@@ -137,9 +187,11 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
   };
 });
 
-builder.defineMetaHandler(async ({ type, id }) => {
+builder.defineMetaHandler(async ({ type, id, config }) => {
   const metaUrl = `${CINEMETA_BASE_URL}/meta/${encodeURIComponent(type)}/${encodeURIComponent(id)}.json`;
   let sourceMeta = { id, type };
+  const displayOptions = buildDisplayOptions(config);
+  const apiKey = getConfigApiKey(config);
 
   try {
     const payload = await fetchJson(metaUrl);
@@ -152,14 +204,15 @@ builder.defineMetaHandler(async ({ type, id }) => {
 
   const ratingPayload = await resolveKinopoiskRating(sourceMeta, {
     allowSearchFallback: SEARCH_FALLBACK_ENABLED,
+    apiKey,
   });
 
   return {
     meta: {
       id,
       type,
-      name: 'Kinopoisk рейтинг',
-      description: `Kinopoisk рейтинг\n${buildKinopoiskStreamDescription(ratingPayload)}`,
+      name: displayOptions.streamName,
+      description: `${displayOptions.streamName}\n${buildKinopoiskStreamDescription(ratingPayload, displayOptions)}`,
     },
     cacheMaxAge: 120,
     staleRevalidate: 600,
@@ -167,7 +220,28 @@ builder.defineMetaHandler(async ({ type, id }) => {
   };
 });
 
-builder.defineStreamHandler(async ({ type, id }) => {
+builder.defineStreamHandler(async ({ type, id, config }) => {
+  const displayOptions = buildDisplayOptions(config);
+  const apiKey = getConfigApiKey(config);
+
+  if (type === 'movie' && !displayOptions.showMovies) {
+    return {
+      streams: [],
+      cacheMaxAge: 120,
+      staleRevalidate: 600,
+      staleError: 86400,
+    };
+  }
+
+  if (type === 'series' && !displayOptions.showSeries) {
+    return {
+      streams: [],
+      cacheMaxAge: 120,
+      staleRevalidate: 600,
+      staleError: 86400,
+    };
+  }
+
   const sourceMeta = {
     id: String(id),
     type,
@@ -182,6 +256,7 @@ builder.defineStreamHandler(async ({ type, id }) => {
   try {
     ratingPayload = await resolveKinopoiskRating(sourceMeta, {
       allowSearchFallback: SEARCH_FALLBACK_ENABLED,
+      apiKey,
     });
   } catch (error) {
     console.error(`[stream] rating lookup failed for ${id}:`, error.message);
@@ -195,6 +270,7 @@ builder.defineStreamHandler(async ({ type, id }) => {
     try {
       ratingPayload = await resolveKinopoiskRating(sourceMeta, {
         allowSearchFallback: true,
+        apiKey,
       });
     } catch (error) {
       console.error(`[stream] fallback lookup failed for ${id}:`, error.message);
@@ -207,8 +283,8 @@ builder.defineStreamHandler(async ({ type, id }) => {
   return {
     streams: [
       {
-        name: 'Kinopoisk рейтинг',
-        description: buildKinopoiskStreamDescription(ratingPayload),
+        name: displayOptions.streamName,
+        description: buildKinopoiskStreamDescription(ratingPayload, displayOptions),
         externalUrl,
         behaviorHints: {
           notWebReady: true,
@@ -242,6 +318,81 @@ function buildExtraPath(extra) {
   }
 
   return `/${segments.join('/')}`;
+}
+
+function parseBoolean(value, fallback) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+      return true;
+    }
+    if (['0', 'false', 'no', 'off'].includes(normalized)) {
+      return false;
+    }
+  }
+
+  return fallback;
+}
+
+function parseEnum(value, allowedValues, fallback) {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+
+  const normalized = value.trim();
+  return allowedValues.includes(normalized) ? normalized : fallback;
+}
+
+function parseNonEmptyString(value, fallback) {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : fallback;
+}
+
+function getConfigApiKey(config) {
+  if (!config || typeof config !== 'object') {
+    return null;
+  }
+
+  if (typeof config.apiKey !== 'string') {
+    return null;
+  }
+
+  const trimmed = config.apiKey.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function buildDisplayOptions(config) {
+  const source = config && typeof config === 'object' ? config : {};
+
+  return {
+    streamName: parseNonEmptyString(source.streamName, DEFAULT_STREAM_NAME),
+    ratingFormat: parseEnum(source.ratingFormat, ['withMax', 'plain'], DEFAULT_RATING_FORMAT),
+    showVotes: parseBoolean(source.showVotes, DEFAULT_SHOW_VOTES),
+    votesFormat: parseEnum(source.votesFormat, ['commas', 'compact'], DEFAULT_VOTES_FORMAT),
+    displayFormat: parseEnum(source.displayFormat, ['multiLine', 'singleLine'], DEFAULT_DISPLAY_FORMAT),
+    showMovies: parseBoolean(source.showMovies, DEFAULT_SHOW_MOVIES),
+    showSeries: parseBoolean(source.showSeries, DEFAULT_SHOW_SERIES),
+  };
+}
+
+function buildDefaultConfigureConfig() {
+  return {
+    streamName: DEFAULT_STREAM_NAME,
+    ratingFormat: DEFAULT_RATING_FORMAT,
+    showVotes: DEFAULT_SHOW_VOTES,
+    votesFormat: DEFAULT_VOTES_FORMAT,
+    displayFormat: DEFAULT_DISPLAY_FORMAT,
+    showMovies: DEFAULT_SHOW_MOVIES,
+    showSeries: DEFAULT_SHOW_SERIES,
+  };
 }
 
 async function fetchJson(url, options = {}) {
@@ -296,43 +447,83 @@ function isHttpStatus(error, statuses) {
   return Number.isFinite(status) && statuses.includes(status);
 }
 
-function isKinopoiskRateLimited() {
-  if (Date.now() < kinopoiskRateLimitedUntil) {
+function resolveApiKey(apiKeyOverride) {
+  if (typeof apiKeyOverride === 'string' && apiKeyOverride.trim().length > 0) {
+    return apiKeyOverride.trim();
+  }
+
+  return KINOPOISK_API_KEY;
+}
+
+function getApiScope(apiKey) {
+  const key = typeof apiKey === 'string' ? apiKey.trim() : '';
+  if (!key) {
+    return 'env:none';
+  }
+
+  return `key:${Buffer.from(key).toString('base64url').slice(0, 10)}`;
+}
+
+function getKinopoiskApiState(apiKey) {
+  const scope = getApiScope(apiKey);
+  let state = kinopoiskApiState.get(scope);
+
+  if (!state) {
+    state = {
+      scope,
+      rateLimitedUntil: 0,
+      hasLoggedRateLimit: false,
+      quotaExceeded: false,
+      hasLoggedQuotaExceeded: false,
+      nextRequestAt: 0,
+      rateGate: Promise.resolve(),
+    };
+    kinopoiskApiState.set(scope, state);
+  }
+
+  return state;
+}
+
+function isKinopoiskRateLimited(apiKey) {
+  const state = getKinopoiskApiState(apiKey);
+  if (Date.now() < state.rateLimitedUntil) {
     return true;
   }
 
-  if (kinopoiskRateLimitedUntil !== 0) {
-    kinopoiskRateLimitedUntil = 0;
-    hasLoggedRateLimit = false;
+  if (state.rateLimitedUntil !== 0) {
+    state.rateLimitedUntil = 0;
+    state.hasLoggedRateLimit = false;
   }
 
   return false;
 }
 
-function markKinopoiskRateLimited(error) {
+function markKinopoiskRateLimited(error, apiKey) {
+  const state = getKinopoiskApiState(apiKey);
   const retryAfterSeconds =
     error && Number.isFinite(Number(error.retryAfterSeconds)) && Number(error.retryAfterSeconds) > 0
       ? Number(error.retryAfterSeconds)
       : RATE_LIMIT_COOLDOWN_SECONDS;
 
   const cooldownUntil = Date.now() + retryAfterSeconds * 1000;
-  if (cooldownUntil > kinopoiskRateLimitedUntil) {
-    kinopoiskRateLimitedUntil = cooldownUntil;
+  if (cooldownUntil > state.rateLimitedUntil) {
+    state.rateLimitedUntil = cooldownUntil;
   }
 
-  if (!hasLoggedRateLimit) {
-    const untilDate = new Date(kinopoiskRateLimitedUntil).toISOString();
-    console.warn(`[kp unofficial] HTTP 429 received. Cooling down requests until ${untilDate}`);
-    hasLoggedRateLimit = true;
+  if (!state.hasLoggedRateLimit) {
+    const untilDate = new Date(state.rateLimitedUntil).toISOString();
+    console.warn(`[kp unofficial ${state.scope}] HTTP 429 received. Cooling down requests until ${untilDate}`);
+    state.hasLoggedRateLimit = true;
   }
 }
 
-function markKinopoiskQuotaExceeded() {
-  kinopoiskQuotaExceeded = true;
+function markKinopoiskQuotaExceeded(apiKey) {
+  const state = getKinopoiskApiState(apiKey);
+  state.quotaExceeded = true;
 
-  if (!hasLoggedQuotaExceeded) {
-    console.warn('[kp unofficial] HTTP 402 received. API quota is exhausted; rating enrichment is paused.');
-    hasLoggedQuotaExceeded = true;
+  if (!state.hasLoggedQuotaExceeded) {
+    console.warn(`[kp unofficial ${state.scope}] HTTP 402 received. API quota is exhausted; rating enrichment is paused.`);
+    state.hasLoggedQuotaExceeded = true;
   }
 }
 
@@ -340,19 +531,20 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function runWithKinopoiskRateGate(task) {
+async function runWithKinopoiskRateGate(task, apiKey) {
+  const state = getKinopoiskApiState(apiKey);
   const run = async () => {
-    const waitMs = Math.max(0, kinopoiskNextRequestAt - Date.now());
+    const waitMs = Math.max(0, state.nextRequestAt - Date.now());
     if (waitMs > 0) {
       await delay(waitMs);
     }
 
-    kinopoiskNextRequestAt = Date.now() + KINOPOISK_MIN_INTERVAL_MS;
+    state.nextRequestAt = Date.now() + KINOPOISK_MIN_INTERVAL_MS;
     return task();
   };
 
-  const queued = kinopoiskRateGate.then(run, run);
-  kinopoiskRateGate = queued.catch(() => undefined);
+  const queued = state.rateGate.then(run, run);
+  state.rateGate = queued.catch(() => undefined);
   return queued;
 }
 
@@ -537,19 +729,21 @@ function extractKinopoiskId(movie) {
   ]);
 }
 
-function getKinopoiskApiHeaders() {
+function getKinopoiskApiHeaders(apiKey) {
   return {
-    'X-API-KEY': KINOPOISK_API_KEY,
+    'X-API-KEY': apiKey,
     'Content-Type': 'application/json',
   };
 }
 
-async function fetchKinopoiskJson(pathWithQuery) {
+async function fetchKinopoiskJson(pathWithQuery, apiKey) {
   const url = `https://kinopoiskapiunofficial.tech${pathWithQuery}`;
-  return runWithKinopoiskRateGate(() =>
-    fetchJson(url, {
-      headers: getKinopoiskApiHeaders(),
-    })
+  return runWithKinopoiskRateGate(
+    () =>
+      fetchJson(url, {
+        headers: getKinopoiskApiHeaders(apiKey),
+      }),
+    apiKey
   );
 }
 
@@ -679,7 +873,7 @@ function buildHydrationCandidates(items, limit, title, year) {
   return selected;
 }
 
-async function pickBestFilmCandidateWithHydration(items, context) {
+async function pickBestFilmCandidateWithHydration(items, context, apiKey) {
   const best = pickBestFilmCandidate(items, context);
   if (!best || !needsCandidateHydration(best, context) || MAX_SEARCH_FALLBACK_ITEMS <= 0) {
     return best;
@@ -694,7 +888,7 @@ async function pickBestFilmCandidateWithHydration(items, context) {
   const hydratedItems = [...items];
   for (const target of hydrationTargets) {
     try {
-      const details = await fetchKinopoiskJson(`/api/v2.2/films/${encodeURIComponent(String(target.kpId))}`);
+      const details = await fetchKinopoiskJson(`/api/v2.2/films/${encodeURIComponent(String(target.kpId))}`, apiKey);
       if (details && typeof details === 'object') {
         hydratedItems[target.index] = { ...target.item, ...details };
       }
@@ -740,7 +934,7 @@ function pickBestFilmCandidate(items, { title, year, imdbId }) {
   return bestCandidate;
 }
 
-async function lookupKinopoiskByImdb(imdbId, stremioType, context = {}) {
+async function lookupKinopoiskByImdb(imdbId, stremioType, apiKey, context = {}) {
   const params = new URLSearchParams();
   params.set('imdbId', imdbId);
   params.set('page', '1');
@@ -749,19 +943,19 @@ async function lookupKinopoiskByImdb(imdbId, stremioType, context = {}) {
     params.set('type', kpType);
   }
 
-  const payload = await fetchKinopoiskJson(`/api/v2.2/films?${params.toString()}`);
+  const payload = await fetchKinopoiskJson(`/api/v2.2/films?${params.toString()}`, apiKey);
   const items = Array.isArray(payload && payload.items) ? payload.items : [];
   const best = await pickBestFilmCandidateWithHydration(items, {
     title: context.title || null,
     year: context.year || null,
     imdbId,
-  });
+  }, apiKey);
   const kpId = extractKinopoiskId(best);
   const baseRating = extractRatingPayload(best);
-  return hydrateRatingPayload(baseRating, kpId);
+  return hydrateRatingPayload(baseRating, kpId, apiKey);
 }
 
-async function lookupKinopoiskByKeyword(title, year, stremioType) {
+async function lookupKinopoiskByKeyword(title, year, stremioType, apiKey) {
   const params = new URLSearchParams();
   params.set('keyword', title);
   params.set('page', '1');
@@ -775,15 +969,15 @@ async function lookupKinopoiskByKeyword(title, year, stremioType) {
     params.set('yearTo', String(year));
   }
 
-  const payload = await fetchKinopoiskJson(`/api/v2.2/films?${params.toString()}`);
+  const payload = await fetchKinopoiskJson(`/api/v2.2/films?${params.toString()}`, apiKey);
   const items = Array.isArray(payload && payload.items) ? payload.items : [];
-  const best = await pickBestFilmCandidateWithHydration(items, { title, year, imdbId: null });
+  const best = await pickBestFilmCandidateWithHydration(items, { title, year, imdbId: null }, apiKey);
   const kpId = extractKinopoiskId(best);
   const baseRating = extractRatingPayload(best);
-  return hydrateRatingPayload(baseRating, kpId);
+  return hydrateRatingPayload(baseRating, kpId, apiKey);
 }
 
-async function hydrateRatingPayload(basePayload, fallbackKpId = null) {
+async function hydrateRatingPayload(basePayload, fallbackKpId = null, apiKey) {
   const kpId =
     (basePayload && basePayload.kpId) ||
     (Number.isFinite(Number(fallbackKpId)) && Number(fallbackKpId) > 0 ? Number(fallbackKpId) : null);
@@ -797,7 +991,7 @@ async function hydrateRatingPayload(basePayload, fallbackKpId = null) {
   }
 
   try {
-    const details = await fetchKinopoiskJson(`/api/v2.2/films/${encodeURIComponent(String(kpId))}`);
+    const details = await fetchKinopoiskJson(`/api/v2.2/films/${encodeURIComponent(String(kpId))}`, apiKey);
     const detailedPayload = extractRatingPayload(details);
     if (detailedPayload) {
       return {
@@ -817,14 +1011,14 @@ async function hydrateRatingPayload(basePayload, fallbackKpId = null) {
   return basePayload ? { ...basePayload, kpId } : null;
 }
 
-function handleKinopoiskLookupError(error, contextLabel) {
+function handleKinopoiskLookupError(error, contextLabel, apiKey) {
   if (isHttpStatus(error, [429])) {
-    markKinopoiskRateLimited(error);
+    markKinopoiskRateLimited(error, apiKey);
     return;
   }
 
   if (isHttpStatus(error, [402])) {
-    markKinopoiskQuotaExceeded();
+    markKinopoiskQuotaExceeded(apiKey);
     return;
   }
 
@@ -845,34 +1039,37 @@ async function resolveKinopoiskRating(meta, options = {}) {
     options && Object.prototype.hasOwnProperty.call(options, 'allowSearchFallback')
       ? Boolean(options.allowSearchFallback)
       : SEARCH_FALLBACK_ENABLED;
+  const apiKey = resolveApiKey(options.apiKey);
+  const apiScope = getApiScope(apiKey);
+  const apiState = getKinopoiskApiState(apiKey);
 
   if (!imdbId && !title) {
     return null;
   }
 
-  const cacheKey = `kp:${imdbId || '-'}:${title || '-'}:${year || '-'}`;
+  const cacheKey = `kp:${apiScope}:${imdbId || '-'}:${title || '-'}:${year || '-'}`;
   const cached = readCache(cacheKey);
   if (cached !== undefined) {
     return cached;
   }
 
-  if (!KINOPOISK_API_KEY && !hasLoggedMissingToken) {
+  if (!apiKey && !hasLoggedMissingToken) {
     console.warn('No KinoPoisk API key configured. Set KINOPOISK_API_KEY.');
     hasLoggedMissingToken = true;
   }
 
-  if (kinopoiskQuotaExceeded || isKinopoiskRateLimited()) {
+  if (apiState.quotaExceeded || isKinopoiskRateLimited(apiKey)) {
     return null;
   }
 
   let rating = null;
   let shouldSkipNullCache = false;
 
-  if (KINOPOISK_API_KEY && imdbId && !kinopoiskQuotaExceeded && !isKinopoiskRateLimited()) {
+  if (apiKey && imdbId && !apiState.quotaExceeded && !isKinopoiskRateLimited(apiKey)) {
     try {
-      rating = await lookupKinopoiskByImdb(imdbId, stremioType, { title, year });
+      rating = await lookupKinopoiskByImdb(imdbId, stremioType, apiKey, { title, year });
     } catch (error) {
-      handleKinopoiskLookupError(error, 'imdb');
+      handleKinopoiskLookupError(error, 'imdb', apiKey);
       if (isHttpStatus(error, [429, 402])) {
         shouldSkipNullCache = true;
       }
@@ -881,23 +1078,23 @@ async function resolveKinopoiskRating(meta, options = {}) {
 
   if (
     !rating &&
-    KINOPOISK_API_KEY &&
+    apiKey &&
     title &&
     allowSearchFallback &&
-    !kinopoiskQuotaExceeded &&
-    !isKinopoiskRateLimited()
+    !apiState.quotaExceeded &&
+    !isKinopoiskRateLimited(apiKey)
   ) {
     try {
-      rating = await lookupKinopoiskByKeyword(title, year, stremioType);
+      rating = await lookupKinopoiskByKeyword(title, year, stremioType, apiKey);
     } catch (error) {
-      handleKinopoiskLookupError(error, 'search');
+      handleKinopoiskLookupError(error, 'search', apiKey);
       if (isHttpStatus(error, [429, 402])) {
         shouldSkipNullCache = true;
       }
     }
   }
 
-  if (isKinopoiskRateLimited() || kinopoiskQuotaExceeded) {
+  if (isKinopoiskRateLimited(apiKey) || apiState.quotaExceeded) {
     shouldSkipNullCache = true;
   }
 
@@ -917,15 +1114,47 @@ function formatRating(rating) {
   return normalized.toFixed(1);
 }
 
-function appendRatingLine(description, ratingPayload) {
+function formatVotes(votes, votesFormat) {
+  const normalizedVotes = Number(votes);
+  if (!Number.isFinite(normalizedVotes) || normalizedVotes < 1) {
+    return null;
+  }
+
+  if (votesFormat === 'compact') {
+    return new Intl.NumberFormat('en-US', {
+      notation: 'compact',
+      maximumFractionDigits: 1,
+    }).format(Math.round(normalizedVotes));
+  }
+
+  return Math.round(normalizedVotes).toLocaleString('en-US');
+}
+
+function formatRatingByConfig(rating, ratingFormat) {
+  const ratingText = formatRating(rating);
+  if (!ratingText) {
+    return null;
+  }
+
+  if (ratingFormat === 'plain') {
+    return ratingText;
+  }
+
+  return `${ratingText}/10`;
+}
+
+function appendRatingLine(description, ratingPayload, displayOptions = buildDefaultConfigureConfig()) {
   const ratingText = formatRating(ratingPayload.rating);
   if (!ratingText) {
     return description;
   }
 
-  let line = `KinoPoisk: ${ratingText}`;
-  if (ratingPayload.votes && ratingPayload.votes >= 1) {
-    line += ` (${Math.round(ratingPayload.votes).toLocaleString('en-US')} votes)`;
+  let line = `KinoPoisk: ${formatRatingByConfig(ratingPayload.rating, displayOptions.ratingFormat)}`;
+  if (displayOptions.showVotes) {
+    const votesText = formatVotes(ratingPayload.votes, displayOptions.votesFormat);
+    if (votesText) {
+      line += ` (${votesText} votes)`;
+    }
   }
 
   if (!description || typeof description !== 'string') {
@@ -939,16 +1168,25 @@ function appendRatingLine(description, ratingPayload) {
   return `${description.trim()}\n\n${line}`;
 }
 
-function buildKinopoiskStreamDescription(ratingPayload) {
+function buildKinopoiskStreamDescription(ratingPayload, displayOptions = buildDefaultConfigureConfig()) {
   if (!ratingPayload || !formatRating(ratingPayload.rating)) {
     return '⭐ Кинопоиск: нет данных';
   }
 
-  const ratingText = formatRating(ratingPayload.rating);
-  const lines = [`⭐ Кинопоиск: ${ratingText}/10`];
+  const ratingText = formatRatingByConfig(ratingPayload.rating, displayOptions.ratingFormat);
+  const votesText = displayOptions.showVotes ? formatVotes(ratingPayload.votes, displayOptions.votesFormat) : null;
+  const mainLine = `⭐ Кинопоиск: ${ratingText}`;
 
-  if (ratingPayload.votes && ratingPayload.votes >= 1) {
-    lines.push(`(${Math.round(ratingPayload.votes).toLocaleString('en-US')} голосов)`);
+  if (displayOptions.displayFormat === 'singleLine') {
+    if (votesText) {
+      return `${mainLine} (${votesText} голосов)`;
+    }
+    return mainLine;
+  }
+
+  const lines = [mainLine];
+  if (votesText) {
+    lines.push(`(${votesText} голосов)`);
   }
 
   return lines.join('\n');
@@ -1008,6 +1246,295 @@ function appendRatingToName(name, ratingPayload) {
 
 function getPublicBaseUrl() {
   return configuredPublicUrl || runtimePublicUrl;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function buildConfigurePageHtml(baseUrl) {
+  const defaultManifestUrl = `${baseUrl}/manifest.json`;
+  const safeDefaultManifestUrl = escapeHtml(defaultManifestUrl);
+  const defaults = buildDefaultConfigureConfig();
+  const defaultsJson = JSON.stringify(defaults);
+
+  return `<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(MANIFEST_NAME)} - Configure</title>
+    <style>
+      :root {
+        --bg: #11131a;
+        --panel: #1a1f2d;
+        --panel-2: #242c40;
+        --text: #f5f7ff;
+        --muted: #b8bfd6;
+        --accent: #7d6bff;
+        --border: #343d58;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+        background: radial-gradient(circle at top right, #1f2145, var(--bg) 55%);
+        color: var(--text);
+      }
+      .wrap {
+        max-width: 900px;
+        margin: 28px auto;
+        padding: 0 16px;
+      }
+      .card {
+        background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 20px;
+        margin-bottom: 16px;
+      }
+      h1, h2 {
+        margin: 0 0 12px;
+        line-height: 1.2;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      label {
+        display: block;
+        font-size: 14px;
+        margin-bottom: 6px;
+        color: var(--muted);
+      }
+      input, select {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: var(--panel-2);
+        color: var(--text);
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      .row input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+      }
+      pre {
+        margin: 0;
+        padding: 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: #151b2a;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 12px;
+      }
+      button, .btn {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--panel-2);
+        color: var(--text);
+        padding: 10px 14px;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+      }
+      .btn-primary {
+        background: var(--accent);
+        border-color: transparent;
+      }
+      @media (max-width: 760px) {
+        .grid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <h1>${escapeHtml(MANIFEST_NAME)}</h1>
+        <p class="muted">Быстрая настройка аддона: API ключ + формат вывода рейтинга и голосов.</p>
+      </div>
+
+      <div class="card">
+        <h2>Quick Install (Default)</h2>
+        <pre id="defaultManifest">${safeDefaultManifestUrl}</pre>
+        <div class="actions">
+          <a class="btn btn-primary" id="installDefault" href="#" rel="noreferrer">Install Default Version</a>
+          <button type="button" id="copyDefault">Copy URL</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Custom Settings</h2>
+        <div class="grid">
+          <div>
+            <label for="apiKey">KinoPoisk API key (optional)</label>
+            <input id="apiKey" type="password" placeholder="a285172c-..." />
+          </div>
+          <div>
+            <label for="streamName">Stream Name</label>
+            <input id="streamName" type="text" value="${escapeHtml(defaults.streamName)}" />
+          </div>
+          <div>
+            <label for="displayFormat">Display Format</label>
+            <select id="displayFormat">
+              <option value="multiLine">Multi-line</option>
+              <option value="singleLine">Single-line</option>
+            </select>
+          </div>
+          <div>
+            <label for="ratingFormat">Rating Format</label>
+            <select id="ratingFormat">
+              <option value="withMax">With max (8.5/10)</option>
+              <option value="plain">Plain (8.5)</option>
+            </select>
+          </div>
+          <div>
+            <label for="votesFormat">Vote Format</label>
+            <select id="votesFormat">
+              <option value="commas">With commas (45,123)</option>
+              <option value="compact">Rounded (45.1K)</option>
+            </select>
+          </div>
+          <div>
+            <label>Visibility</label>
+            <div class="row"><input id="showVotes" type="checkbox" checked /><span>Show vote counts</span></div>
+            <div class="row"><input id="showMovies" type="checkbox" checked /><span>Show ratings for movies</span></div>
+            <div class="row"><input id="showSeries" type="checkbox" checked /><span>Show ratings for series</span></div>
+          </div>
+        </div>
+
+        <h2 style="margin-top: 16px;">Generated Manifest URL</h2>
+        <pre id="customManifest"></pre>
+        <div class="actions">
+          <a class="btn btn-primary" id="installCustom" href="#" rel="noreferrer">Install Custom Version</a>
+          <button type="button" id="copyCustom">Copy URL</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        const baseUrl = ${JSON.stringify(baseUrl)};
+        const defaults = ${defaultsJson};
+
+        const ids = [
+          'apiKey',
+          'streamName',
+          'displayFormat',
+          'ratingFormat',
+          'votesFormat',
+          'showVotes',
+          'showMovies',
+          'showSeries',
+        ];
+
+        const defaultManifestEl = document.getElementById('defaultManifest');
+        const customManifestEl = document.getElementById('customManifest');
+        const installDefaultEl = document.getElementById('installDefault');
+        const installCustomEl = document.getElementById('installCustom');
+        const copyDefaultEl = document.getElementById('copyDefault');
+        const copyCustomEl = document.getElementById('copyCustom');
+
+        function toStremioUrl(url) {
+          return 'stremio://' + url.replace(/^https?:\\/\\//, '');
+        }
+
+        function collectConfig() {
+          const apiKey = document.getElementById('apiKey').value.trim();
+          return {
+            apiKey: apiKey,
+            streamName: document.getElementById('streamName').value.trim() || defaults.streamName,
+            displayFormat: document.getElementById('displayFormat').value || defaults.displayFormat,
+            ratingFormat: document.getElementById('ratingFormat').value || defaults.ratingFormat,
+            votesFormat: document.getElementById('votesFormat').value || defaults.votesFormat,
+            showVotes: document.getElementById('showVotes').checked,
+            showMovies: document.getElementById('showMovies').checked,
+            showSeries: document.getElementById('showSeries').checked,
+          };
+        }
+
+        function buildUrl() {
+          const cfg = collectConfig();
+          const payload = {};
+
+          if (cfg.apiKey) payload.apiKey = cfg.apiKey;
+          if (cfg.streamName !== defaults.streamName) payload.streamName = cfg.streamName;
+          if (cfg.displayFormat !== defaults.displayFormat) payload.displayFormat = cfg.displayFormat;
+          if (cfg.ratingFormat !== defaults.ratingFormat) payload.ratingFormat = cfg.ratingFormat;
+          if (cfg.votesFormat !== defaults.votesFormat) payload.votesFormat = cfg.votesFormat;
+          if (cfg.showVotes !== defaults.showVotes) payload.showVotes = cfg.showVotes;
+          if (cfg.showMovies !== defaults.showMovies) payload.showMovies = cfg.showMovies;
+          if (cfg.showSeries !== defaults.showSeries) payload.showSeries = cfg.showSeries;
+
+          if (Object.keys(payload).length === 0) {
+            return baseUrl + '/manifest.json';
+          }
+
+          return baseUrl + '/' + encodeURIComponent(JSON.stringify(payload)) + '/manifest.json';
+        }
+
+        function refresh() {
+          const defaultUrl = baseUrl + '/manifest.json';
+          const customUrl = buildUrl();
+
+          defaultManifestEl.textContent = defaultUrl;
+          customManifestEl.textContent = customUrl;
+
+          installDefaultEl.href = toStremioUrl(defaultUrl);
+          installCustomEl.href = toStremioUrl(customUrl);
+        }
+
+        async function copyText(text) {
+          try {
+            await navigator.clipboard.writeText(text);
+            return true;
+          } catch (_) {
+            return false;
+          }
+        }
+
+        copyDefaultEl.addEventListener('click', async function () {
+          await copyText(defaultManifestEl.textContent || '');
+        });
+
+        copyCustomEl.addEventListener('click', async function () {
+          await copyText(customManifestEl.textContent || '');
+        });
+
+        ids.forEach(function (id) {
+          const el = document.getElementById(id);
+          if (!el) return;
+          el.addEventListener('input', refresh);
+          el.addEventListener('change', refresh);
+        });
+
+        refresh();
+      })();
+    </script>
+  </body>
+</html>`;
 }
 
 function buildPosterOverlayUrl(posterUrl, ratingPayload) {
@@ -1167,24 +1694,14 @@ app.get('/poster.svg', (req, res) => {
   res.status(200).send(svg);
 });
 
+app.get('/configure', (_req, res) => {
+  const html = buildConfigurePageHtml(getPublicBaseUrl());
+  res.setHeader('content-type', 'text/html; charset=utf-8');
+  res.status(200).send(html);
+});
+
 app.get('/', (_req, res) => {
-  const manifestUrl = `${getPublicBaseUrl()}/manifest.json`;
-  res.status(200).send(`
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>${MANIFEST_NAME}</title>
-  </head>
-  <body style="font-family: Arial, sans-serif; padding: 24px; line-height: 1.45;">
-    <h1>${MANIFEST_NAME}</h1>
-    <p>Manifest URL:</p>
-    <pre style="padding: 10px; border: 1px solid #ddd; overflow: auto;">${manifestUrl}</pre>
-    <p>Add this URL in Stremio using <strong>Addons -> Add Addon -> Enter URL</strong>.</p>
-  </body>
-</html>
-`);
+  res.redirect(302, '/configure');
 });
 
 app.use(getRouter(addonInterface));
@@ -1192,4 +1709,5 @@ app.use(getRouter(addonInterface));
 app.listen(PORT, HOST, () => {
   console.log(`KinoPoisk addon running at ${getPublicBaseUrl()}`);
   console.log(`Manifest: ${getPublicBaseUrl()}/manifest.json`);
+  console.log(`Configure: ${getPublicBaseUrl()}/configure`);
 });

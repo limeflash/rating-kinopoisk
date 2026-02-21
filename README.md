@@ -24,6 +24,7 @@
   - `/api/v2.2/films?imdbId=<tt...>`
   - `/api/v2.2/films?keyword=<title>`
 - Учет лимитов API: для `/api/v2.2/films` добавлен троттлинг запросов и пауза после `HTTP 429`.
+- Встроенная страница настройки: `/configure` (генерирует персональный manifest URL с параметрами отображения и опциональным API-ключом).
 
 ## Требования
 
@@ -47,6 +48,9 @@ npm start
 ```
 
 По умолчанию аддон доступен на `http://localhost:3000`.
+
+Страница настройки:
+- `http://localhost:3000/configure`
 
 ## Деплой на VPS (Traefik + Cloudflare)
 
@@ -244,6 +248,7 @@ sudo nginx -t
 5. Вставь URL манифеста:
    - `http://localhost:3000/manifest.json` для локального запуска,
    - или публичный URL при деплое.
+   - для кастомных настроек открой `/configure`, задай параметры и скопируй сгенерированный URL.
 6. На странице фильма/сериала выбери фильтр провайдера `Kinopoisk рейтинг` (или `All`).
 
 ## Переменные окружения
@@ -266,6 +271,13 @@ sudo nginx -t
 | `POSTER_OVERLAY_ENABLED` | `false` | Служебная настройка совместимости |
 | `TITLE_RATING_ENABLED` | `true` | Служебная настройка совместимости |
 | `STREAM_FETCH_CINEMETA_META` | `false` | Если `true`, stream handler дополнительно тянет Cinemeta meta |
+| `DEFAULT_STREAM_NAME` | `Kinopoisk рейтинг` | Имя стрима по умолчанию на странице `/configure` |
+| `DEFAULT_RATING_FORMAT` | `withMax` | Формат рейтинга по умолчанию: `withMax` или `plain` |
+| `DEFAULT_VOTES_FORMAT` | `commas` | Формат голосов по умолчанию: `commas` или `compact` |
+| `DEFAULT_DISPLAY_FORMAT` | `multiLine` | Формат строк по умолчанию: `multiLine` или `singleLine` |
+| `DEFAULT_SHOW_VOTES` | `true` | Показывать количество голосов по умолчанию |
+| `DEFAULT_SHOW_MOVIES` | `true` | Показывать рейтинг для фильмов по умолчанию |
+| `DEFAULT_SHOW_SERIES` | `true` | Показывать рейтинг для сериалов по умолчанию |
 
 ## Примечания
 
