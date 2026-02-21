@@ -17,7 +17,10 @@
   - `⭐ Кинопоиск: 8.1/10`
   - `(45,123 голосов)`
 - Кэширование ответов в памяти.
-- Источник данных: `kinopoiskapiunofficial.tech`:
+- Источник данных:
+  - [KinoPoisk Unofficial API](https://kinopoiskapiunofficial.tech/)
+  - [Документация API](https://kinopoiskapiunofficial.tech/documentation/api/)
+- Используемые endpoint'ы:
   - `/api/v2.2/films?imdbId=<tt...>`
   - `/api/v2.2/films?keyword=<title>`
 - Учет лимитов API: для `/api/v2.2/films` добавлен троттлинг запросов и пауза после `HTTP 429`.
@@ -26,6 +29,7 @@
 
 - Node.js 18+
 - API-ключ KinoPoisk Unofficial (`X-API-KEY`)
+- Актуальный источник ключа и API: [kinopoiskapiunofficial.tech](https://kinopoiskapiunofficial.tech/)
 
 ## Быстрый старт
 
@@ -168,6 +172,7 @@ URL для установки в Stremio:
 ## Примечания
 
 - Алиас `KINOPOISK_UNOFFICIAL_API_KEY` поддерживается для обратной совместимости.
+- Аддон использует фиксированный API-хост `https://kinopoiskapiunofficial.tech` (другой хост/прямой IP без правок кода не поддерживается).
 - Из-за отличий в источниках данных поля и сопоставления могут отличаться для отдельных тайтлов.
 - Для удаленного доступа (мобильные/TV-клиенты) обязательно указывай корректный `PUBLIC_URL` по HTTPS.
 - Для деплоя через Traefik в Docker используй `.env` с `HOST=0.0.0.0` и `PORT=3000`.
