@@ -253,6 +253,37 @@ sudo journalctl -u kinopoisk-rating -n 100 --no-pager
 sudo nginx -t
 ```
 
+## Обновление одной командой
+
+В проекте есть универсальный скрипт обновления:
+- `/opt/kinopoisk-rating-addon/scripts/update.sh`
+
+Что делает скрипт:
+- подтягивает изменения из git (`git pull --ff-only`),
+- если найден Docker-контейнер `kinopoisk-rating` -> перезапускает его,
+- если найден systemd-сервис `kinopoisk-rating` -> ставит зависимости и перезапускает сервис.
+
+Подготовка один раз на VPS:
+```bash
+cd /opt/kinopoisk-rating-addon
+chmod +x scripts/update.sh
+```
+
+Обновление до актуального `main`:
+```bash
+sudo /opt/kinopoisk-rating-addon/scripts/update.sh
+```
+
+Обновление до конкретной ветки (например тестовой):
+```bash
+sudo /opt/kinopoisk-rating-addon/scripts/update.sh codex/test
+```
+
+Запуск с локальной машины одной командой через SSH:
+```bash
+ssh root@YOUR_VPS_IP "sudo /opt/kinopoisk-rating-addon/scripts/update.sh"
+```
+
 ## Установка в Stremio
 
 1. Открой Stremio.
@@ -264,6 +295,12 @@ sudo nginx -t
    - или публичный URL при деплое.
    - для кастомных настроек открой `/configure`, задай параметры и скопируй сгенерированный URL.
 6. На странице фильма/сериала выбери фильтр провайдера `Kinopoisk рейтинг` (или `All`).
+
+Обновления аддона в Stremio:
+- если ты оставляешь тот же URL manifest, переустанавливать аддон обычно не нужно;
+- после деплоя новой версии Stremio подтянет обновление автоматически;
+- если обновление не видно сразу, перезапусти Stremio/обнови страницу клиента;
+- важно использовать тот же exact URL (особенно если это кастомный URL из `/configure`).
 
 ## Переменные окружения
 
