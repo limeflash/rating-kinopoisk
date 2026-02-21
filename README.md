@@ -1,5 +1,7 @@
 # KinoPoisk Rating Addon для Stremio
 
+[English version](README.en.md)
+
 ![Превью аддона KinoPoisk Rating](docs/images/screen.png)
 
 Аддон для Stremio, который показывает рейтинг Кинопоиска на странице фильма или сериала.
