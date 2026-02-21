@@ -334,6 +334,8 @@ Addon updates in Stremio:
 | `DEFAULT_SHOW_VOTES` | `true` | Show vote count by default |
 | `DEFAULT_SHOW_MOVIES` | `true` | Show ratings for movies by default |
 | `DEFAULT_SHOW_SERIES` | `true` | Show ratings for series by default |
+| `STREMIO_ADDONS_ISSUER` | `https://stremio-addons.net` | Issuer for `stremioAddonsConfig` in manifest |
+| `STREMIO_ADDONS_SIGNATURE` | set | Signature used for addon claim/verification on stremio-addons.net |
 
 ## Notes
 
@@ -342,6 +344,7 @@ Addon updates in Stremio:
 - Because data sources differ, fields/matching may vary for some titles.
 - For remote access (mobile/TV clients), always set correct HTTPS `PUBLIC_URL`.
 - For Traefik Docker deploy, use `.env` with `HOST=0.0.0.0` and `PORT=3000`.
+- For claim/verify on [stremio-addons.net](https://stremio-addons.net), use `STREMIO_ADDONS_ISSUER` and `STREMIO_ADDONS_SIGNATURE`.
 - If your API plan has strict limits, use:
   - `SEARCH_FALLBACK_ENABLED=false`
   - `MAX_ENRICH_ITEMS=8`

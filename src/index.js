@@ -29,6 +29,11 @@ const DEFAULT_DISPLAY_FORMAT = process.env.DEFAULT_DISPLAY_FORMAT || 'multiLine'
 const DEFAULT_SHOW_VOTES = String(process.env.DEFAULT_SHOW_VOTES || 'true').toLowerCase() !== 'false';
 const DEFAULT_SHOW_MOVIES = String(process.env.DEFAULT_SHOW_MOVIES || 'true').toLowerCase() !== 'false';
 const DEFAULT_SHOW_SERIES = String(process.env.DEFAULT_SHOW_SERIES || 'true').toLowerCase() !== 'false';
+const STREMIO_ADDONS_ISSUER = (process.env.STREMIO_ADDONS_ISSUER || 'https://stremio-addons.net').trim();
+const STREMIO_ADDONS_SIGNATURE = (
+  process.env.STREMIO_ADDONS_SIGNATURE ||
+  'eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..GrryKOw_vdXU5IxqVjYUeQ.hcUmZqLgXfbRWtB_Lt3X6NTt7ORC44Wnl13wqcHDz9qO13nHZEmO3ebB38XuE1muhyTlAPbdQMksYzkor9DmEAGJf-QLfqtXlf0ywTzNeszoKxn3NoWrVPpESTbUZVuu.p6cZsCpDXEJTAVjjBZrd4g'
+).trim();
 
 function loadLocalEnvFile() {
   const envPath = path.resolve(process.cwd(), '.env');
@@ -74,7 +79,7 @@ function loadLocalEnvFile() {
 }
 
 const MANIFEST_ID = process.env.ADDON_ID || 'org.ennanoff.kinopoisk.rating';
-const MANIFEST_VERSION = process.env.ADDON_VERSION || '1.1.0';
+const MANIFEST_VERSION = process.env.ADDON_VERSION || '1.1.1';
 const MANIFEST_NAME = process.env.ADDON_NAME || 'Kinopoisk рейтинг';
 
 const configuredPublicUrl = (process.env.PUBLIC_URL || '').trim().replace(/\/$/, '');
@@ -114,6 +119,14 @@ const manifest = {
     },
   ],
   idPrefixes: ['tt'],
+  ...(STREMIO_ADDONS_SIGNATURE
+    ? {
+        stremioAddonsConfig: {
+          issuer: STREMIO_ADDONS_ISSUER,
+          signature: STREMIO_ADDONS_SIGNATURE,
+        },
+      }
+    : {}),
   behaviorHints: {
     configurable: true,
   },

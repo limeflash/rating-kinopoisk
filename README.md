@@ -334,6 +334,8 @@ ssh root@YOUR_VPS_IP "sudo /opt/kinopoisk-rating-addon/scripts/update.sh"
 | `DEFAULT_SHOW_VOTES` | `true` | Показывать количество голосов по умолчанию |
 | `DEFAULT_SHOW_MOVIES` | `true` | Показывать рейтинг для фильмов по умолчанию |
 | `DEFAULT_SHOW_SERIES` | `true` | Показывать рейтинг для сериалов по умолчанию |
+| `STREMIO_ADDONS_ISSUER` | `https://stremio-addons.net` | Issuer для `stremioAddonsConfig` в manifest |
+| `STREMIO_ADDONS_SIGNATURE` | задано | Подпись для подтверждения аддона на stremio-addons.net |
 
 ## Примечания
 
@@ -342,6 +344,7 @@ ssh root@YOUR_VPS_IP "sudo /opt/kinopoisk-rating-addon/scripts/update.sh"
 - Из-за отличий в источниках данных поля и сопоставления могут отличаться для отдельных тайтлов.
 - Для удаленного доступа (мобильные/TV-клиенты) обязательно указывай корректный `PUBLIC_URL` по HTTPS.
 - Для деплоя через Traefik в Docker используй `.env` с `HOST=0.0.0.0` и `PORT=3000`.
+- Для claim/verify на [stremio-addons.net](https://stremio-addons.net) используй `STREMIO_ADDONS_ISSUER` и `STREMIO_ADDONS_SIGNATURE`.
 - Если у твоего тарифа строгие лимиты API, используй:
   - `SEARCH_FALLBACK_ENABLED=false`
   - `MAX_ENRICH_ITEMS=8`
