@@ -1350,6 +1350,33 @@ function buildConfigurePageHtml(baseUrl) {
         gap: 10px;
         margin-top: 12px;
       }
+      .preview-card {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: #151b2a;
+        padding: 12px;
+      }
+      .preview-line {
+        display: grid;
+        grid-template-columns: 170px 1fr;
+        gap: 12px;
+        align-items: start;
+      }
+      .preview-name {
+        color: var(--text);
+        font-size: 22px;
+        line-height: 1.1;
+      }
+      .preview-desc {
+        white-space: pre-line;
+        line-height: 1.3;
+        font-size: 30px;
+      }
+      .preview-meta {
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 13px;
+      }
       button, .btn {
         border: 1px solid var(--border);
         border-radius: 10px;
@@ -1425,6 +1452,15 @@ function buildConfigurePageHtml(baseUrl) {
           </div>
         </div>
 
+        <h2 style="margin-top: 16px;">Preview In Stremio</h2>
+        <div class="preview-card">
+          <div class="preview-line">
+            <div class="preview-name" id="previewName"></div>
+            <div class="preview-desc" id="previewDescription"></div>
+          </div>
+          <div class="preview-meta" id="previewMeta"></div>
+        </div>
+
         <h2 style="margin-top: 16px;">Generated Manifest URL</h2>
         <pre id="customManifest"></pre>
         <div class="actions">
@@ -1456,6 +1492,9 @@ function buildConfigurePageHtml(baseUrl) {
         const installCustomEl = document.getElementById('installCustom');
         const copyDefaultEl = document.getElementById('copyDefault');
         const copyCustomEl = document.getElementById('copyCustom');
+        const previewNameEl = document.getElementById('previewName');
+        const previewDescriptionEl = document.getElementById('previewDescription');
+        const previewMetaEl = document.getElementById('previewMeta');
 
         function toStremioUrl(url) {
           return 'stremio://' + url.replace(/^https?:\\/\\//, '');
@@ -1472,6 +1511,37 @@ function buildConfigurePageHtml(baseUrl) {
             showVotes: document.getElementById('showVotes').checked,
             showMovies: document.getElementById('showMovies').checked,
             showSeries: document.getElementById('showSeries').checked,
+          };
+        }
+
+        function formatVotes(votes, format) {
+          const n = Number(votes);
+          if (!Number.isFinite(n) || n < 1) return null;
+
+          if (format === 'compact') {
+            return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(Math.round(n));
+          }
+
+          return Math.round(n).toLocaleString('en-US');
+        }
+
+        function buildPreview(cfg) {
+          const rating = cfg.ratingFormat === 'plain' ? '8.1' : '8.1/10';
+          const votes = cfg.showVotes ? formatVotes(45123, cfg.votesFormat) : null;
+          const main = '⭐ Кинопоиск: ' + rating;
+          const desc = cfg.displayFormat === 'singleLine'
+            ? (votes ? main + ' (' + votes + ' голосов)' : main)
+            : (votes ? main + '\\n(' + votes + ' голосов)' : main);
+
+          const targets = [];
+          if (cfg.showMovies) targets.push('фильмы');
+          if (cfg.showSeries) targets.push('сериалы');
+          const scope = targets.length ? targets.join(', ') : 'ничего (оба типа отключены)';
+
+          return {
+            name: cfg.streamName,
+            description: desc,
+            scope: scope,
           };
         }
 
@@ -1498,12 +1568,18 @@ function buildConfigurePageHtml(baseUrl) {
         function refresh() {
           const defaultUrl = baseUrl + '/manifest.json';
           const customUrl = buildUrl();
+          const cfg = collectConfig();
+          const preview = buildPreview(cfg);
 
           defaultManifestEl.textContent = defaultUrl;
           customManifestEl.textContent = customUrl;
 
           installDefaultEl.href = toStremioUrl(defaultUrl);
           installCustomEl.href = toStremioUrl(customUrl);
+
+          previewNameEl.textContent = preview.name;
+          previewDescriptionEl.textContent = preview.description;
+          previewMetaEl.textContent = 'Показывать для: ' + preview.scope;
         }
 
         async function copyText(text) {
