@@ -1,5 +1,7 @@
 # KinoPoisk Rating Stremio Addon
 
+![KinoPoisk rating addon preview](docs/images/screen.png)
+
 Stremio addon that works like a rating-overlay addon, but focused on **KinoPoisk** ratings.
 
 It works in detail-page mode:
